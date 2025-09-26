@@ -13,12 +13,18 @@ venv/
 .env/
 *.egg-info/
 
-# Data & models
-data/
-models/
-*.h5
-*.pkl
-*.joblib
+# Large dataset files (keep structure, exclude large data)
+data/*.csv
+!data/README.md
+
+# Model files (too large for GitHub)
+models/*.pkl
+models/*.joblib
+models/*.h5
+!models/README.md
+
+# But keep sample results for demonstration
+!models/training_results.pkl
 
 # Logs
 *.log
@@ -26,3 +32,12 @@ models/
 # OS files
 .DS_Store
 Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.swp
+*~
