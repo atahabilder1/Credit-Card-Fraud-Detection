@@ -1,0 +1,169 @@
+# Continuous Deployment Pipeline
+# Builds and deploys to production on push to main
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  # Build and push Docker images
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      api_image: ${{ steps.meta-api.outputs.tags }}
+      mlflow_image: ${{ steps.meta-mlflow.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for API image
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for MLflow image
+        id: meta-mlflow
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/mlflow
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push MLflow image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.mlflow
+          push: true
+          tags: ${{ steps.meta-mlflow.outputs.tags }}
+          labels: ${{ steps.meta-mlflow.outputs.labels }}
+
+  # Deploy to production server
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Mac Mini
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH || '~/fraud-detection' }}
+
+            # Pull latest code
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Pull latest images
+            docker-compose pull
+
+            # Restart services with zero downtime
+            docker-compose up -d --remove-orphans
+
+            # Clean up old images
+            docker image prune -f
+
+            # Verify deployment
+            sleep 10
+            curl -f http://localhost:8000/health || exit 1
+
+            echo "Deployment successful!"
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "::notice::Deployment to production completed successfully"
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "::error::Deployment to production failed"
+
+  # Create GitHub release
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(date +%Y.%m.%d)-$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          body: |
+            ## Changes in this release
+
+            Automated release from commit ${{ github.sha }}
+
+            ### Docker Images
+            - API: `${{ needs.build-and-push.outputs.api_image }}`
+            - MLflow: `${{ needs.build-and-push.outputs.mlflow_image }}`
+
+            ### Deployment
+            - Deployed to production: ✅
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

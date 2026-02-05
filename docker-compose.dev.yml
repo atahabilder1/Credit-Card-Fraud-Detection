@@ -1,0 +1,103 @@
+# Credit Card Fraud Detection - Development Stack
+# Overrides for local development with hot-reload
+
+version: "3.8"
+
+services:
+  # ============== FastAPI Application (Dev) ==============
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fraud-detection-api-dev
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_PATH=/app/models/xgboost_model.pkl
+      - DATABASE_PATH=/app/data/predictions.db
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - LOG_LEVEL=DEBUG
+      - DEBUG=true
+    volumes:
+      # Mount source for hot-reload
+      - ./src:/app/src:ro
+      - ./api:/app/api:ro
+      - ./models:/app/models:ro
+      - ./drift_detection:/app/drift_detection:ro
+      - ./mlflow_tracking:/app/mlflow_tracking:ro
+      - ./frontend:/app/frontend:ro
+      - ./config:/app/config:ro
+      - prediction_data:/app/data
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    depends_on:
+      - mlflow
+    networks:
+      - fraud-network-dev
+
+  # ============== MLflow Tracking Server (Dev) ==============
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
+    container_name: fraud-detection-mlflow-dev
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data_dev:/mlflow
+    networks:
+      - fraud-network-dev
+
+  # ============== Prometheus (Dev) ==============
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: fraud-detection-prometheus-dev
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data_dev:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    depends_on:
+      - api
+    networks:
+      - fraud-network-dev
+
+  # ============== Grafana (Dev) ==============
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: fraud-detection-grafana-dev
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data_dev:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - fraud-network-dev
+
+# ============== Volumes (Dev) ==============
+volumes:
+  prediction_data:
+    driver: local
+  mlflow_data_dev:
+    driver: local
+  prometheus_data_dev:
+    driver: local
+  grafana_data_dev:
+    driver: local
+
+# ============== Networks (Dev) ==============
+networks:
+  fraud-network-dev:
+    driver: bridge

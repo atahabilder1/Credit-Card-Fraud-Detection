@@ -1,0 +1,131 @@
+# Credit Card Fraud Detection - Production Stack
+# Full MLOps deployment with API, monitoring, and model registry
+
+version: "3.8"
+
+services:
+  # ============== FastAPI Application ==============
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fraud-detection-api
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_PATH=/app/models/xgboost_model.pkl
+      - DATABASE_PATH=/app/data/predictions.db
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./models:/app/models:ro
+      - prediction_data:/app/data
+    depends_on:
+      - mlflow
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - fraud-network
+
+  # ============== MLflow Tracking Server ==============
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
+    container_name: fraud-detection-mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - fraud-network
+
+  # ============== Prometheus Metrics ==============
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: fraud-detection-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+      - "--storage.tsdb.retention.time=15d"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - fraud-network
+
+  # ============== Grafana Dashboards ==============
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: fraud-detection-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=frauddetection
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - fraud-network
+
+  # ============== Traffic Simulator ==============
+  # Generates realistic traffic to keep dashboards alive
+  traffic-simulator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fraud-detection-traffic
+    command: ["python", "-m", "scripts.traffic_simulator"]
+    environment:
+      - API_URL=http://api:8000
+      - SIMULATION_INTERVAL_MIN=5
+      - SIMULATION_INTERVAL_MAX=30
+      - FRAUD_RATE=0.02
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - fraud-network
+
+# ============== Volumes ==============
+volumes:
+  prediction_data:
+    driver: local
+  mlflow_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# ============== Networks ==============
+networks:
+  fraud-network:
+    driver: bridge

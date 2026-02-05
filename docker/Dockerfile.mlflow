@@ -1,0 +1,39 @@
+# MLflow Tracking Server
+# Docker image for experiment tracking and model registry
+
+FROM python:3.10-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /mlflow
+
+# Install MLflow and dependencies
+RUN pip install --no-cache-dir \
+    mlflow==2.9.0 \
+    psycopg2-binary \
+    boto3
+
+# Create directories for artifacts and backend store
+RUN mkdir -p /mlflow/artifacts /mlflow/mlruns
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash mlflowuser \
+    && chown -R mlflowuser:mlflowuser /mlflow
+USER mlflowuser
+
+# Expose port
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# Run MLflow server
+CMD ["mlflow", "server", \
+     "--backend-store-uri", "sqlite:///mlflow/mlruns.db", \
+     "--default-artifact-root", "/mlflow/artifacts", \
+     "--host", "0.0.0.0", \
+     "--port", "5000"]

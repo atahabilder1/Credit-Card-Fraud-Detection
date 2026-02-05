@@ -1,0 +1,98 @@
+# Credit Card Fraud Detection - Configuration
+# ============================================
+# Application configuration file
+
+# Application Settings
+app:
+  name: "Credit Card Fraud Detection API"
+  version: "1.0.0"
+  debug: false
+  log_level: "INFO"
+
+# API Server
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  cors_origins:
+    - "*"
+
+# Model Configuration
+model:
+  path: "models/xgboost_model.pkl"
+  name: "xgboost_fraud_detector"
+  version: "1.0.0"
+  features:
+    - V1
+    - V2
+    - V3
+    - V4
+    - V5
+    - V6
+    - V7
+    - V8
+    - V9
+    - V10
+    - V11
+    - V12
+    - V13
+    - V14
+    - V15
+    - V16
+    - V17
+    - V18
+    - V19
+    - V20
+    - V21
+    - V22
+    - V23
+    - V24
+    - V25
+    - V26
+    - V27
+    - V28
+    - Amount
+
+# Database
+database:
+  path: "predictions.db"
+  pool_size: 5
+
+# MLflow Configuration
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "fraud-detection"
+  registry_uri: "http://localhost:5000"
+
+# Drift Detection
+drift:
+  baseline_path: "models/drift_baseline.json"
+  check_interval_seconds: 3600
+  thresholds:
+    psi: 0.2
+    ks: 0.1
+    warning: 0.1
+    critical: 0.25
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+    port: 8000
+    path: "/metrics"
+  grafana:
+    url: "http://localhost:3000"
+
+# Traffic Simulator
+simulator:
+  api_url: "http://localhost:8000"
+  interval_min: 5
+  interval_max: 30
+  fraud_rate: 0.02
+
+# Developer Information
+developer:
+  name: "Anik Tahabilder"
+  email: "tahabilderanik@gmail.com"
+  linkedin: "https://www.linkedin.com/in/tahabilder/"
+  github: "https://github.com/tahabilder"
